@@ -1,0 +1,22 @@
+- name: ServiceNow Change Validation Playbook
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Target Change Record
+
+  tasks:
+    - name: Create change request
+      servicenow.itsm.change_request:
+        instance:
+          host: "{{ snow_instance }}"
+          username: "{{ snow_username }}"
+          password: "{{ snow_password }}"
+        type: normal
+        state: new
+        requested_by: AAP
+        short_description: "Testing "
+        description: "desc"
+        assignment_group: "{{ assignment_group }}"
+        priority: "3"
+        risk: "3"
+      register: change_request
