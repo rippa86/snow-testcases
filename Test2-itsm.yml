@@ -13,6 +13,6 @@
           username: "{{ snow_username }}"
           password: "{{ snow_password }}"
         number: "{{ change_number }}"
-        state: implement
+        state: new
         other:
           work_notes: "Ansible has Updated this record"
