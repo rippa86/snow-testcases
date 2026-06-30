@@ -1,0 +1,16 @@
+---
+- name: ServiceNow Change Validation Playbook
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Target Change Record
+
+  tasks:
+    - name: Update Work Notes and Additional Comments
+      servicenow.itsm.incident_info:
+        instance:
+          host: "{{ snow_instance }}"
+          username: "{{ snow_username }}"
+          password: "{{ snow_password }}"
+        assignment_group: "{{ assignment_group }}"
+
