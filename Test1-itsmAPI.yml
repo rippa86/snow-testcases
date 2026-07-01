@@ -1,0 +1,181 @@
+- name: Approve Change and Let Workflow Move it to Scheduled
+  hosts: localhost
+  gather_facts: false
+  vars:
+    approval_state: approved
+    approval_comments: "hello world"
+
+  tasks:
+    - name: Gather change request information
+      servicenow.itsm.change_request_info:
+        instance:
+          host: "{{ snow_instance }}"
+          username: "{{ snow_username }}"
+          password: "{{ snow_password }}"
+        number: "{{ change_number }}"
+      register: change_info
+    - name: Set change record facts
+      ansible.builtin.set_fact:
+        change_record: "{{ change_info.records | first }}"
+
+    - name: Display current change state
+      ansible.builtin.debug:
+        msg:
+          - "Change number: {{ change_record.number }}"
+          - "Current state: {{ change_record.state }}"
+          - "Approval status: {{ change_record.approval | default('unknown') }}"
+          - "Assignment group: {{ change_record.assignment_group }}"
+
+    - name: Gather pending approvals for the change
+      when: >-
+        change_record.state in ['assess', 'authorize']
+        or change_record.approval | default('') == 'requested'
+      servicenow.itsm.api_info:
+        instance:
+          host: "{{ snow_instance }}"
+          username: "{{ snow_username }}"
+          password: "{{ snow_password }}"
+        resource: sysapproval_approver
+        sysparm_query: >-
+          source_table=change_request^document_id={{ change_record.sys_id }}^state=requested^approver.user_name={{ snow_username }}
+        columns:
+          - sys_id
+          - state
+          - approver
+      register: pending_approvals
+
+    - name: Ensure pending approval records exist
+      when: >-
+        change_record.state in ['assess', 'authorize']
+        or change_record.approval | default('') == 'requested'
+      ansible.builtin.assert:
+        that:
+          - pending_approvals.record | length > 0
+        fail_msg: >-
+          No pending approval records found for {{ change_number }} assigned to {{ snow_username }}.
+
+    - name: Approve pending approval records
+      when: >-
+        change_record.state in ['assess', 'authorize']
+        or change_record.approval | default('') == 'requested'
+      servicenow.itsm.api:
+        instance:
+          host: "{{ snow_instance }}"
+          username: "{{ snow_username }}"
+          password: "{{ snow_password }}"
+        resource: sysapproval_approver
+        action: patch
+        sys_id: "{{ item.sys_id }}"
+        data: "{{ approval_payload }}"
+      loop: "{{ pending_approvals.record }}"
+      loop_control:
+        label: "{{ item.sys_id }}"
+      vars:
+        approval_payload: >-
+          {{
+            {'state': approval_state}
+            | combine({'comments': approval_comments} if approval_comments | length > 0 else {})
+          }}
+      register: approval_updates
+
+    - name: Report when no approval action was required
+      when:
+        - change_record.state not in ['assess', 'authorize']
+        - change_record.approval | default('') != 'requested'
+      ansible.builtin.debug:
+        msg: >-
+          Change {{ change_number }} is in state '{{ change_record.state }}'
+          and is not in assess, authorize, or waiting for approval; no action performed.
+
+    - name: Display approval result
+      when: approval_updates is defined
+      ansible.builtin.debug:
+        msg:
+          - "Approval records updated: {{ approval_updates.results | selectattr('changed') | list | length }}"
+          - "Approval state sent: {{ approval_state }}"
+          - "API responses: {{ approval_updates.results | map(attribute='record') | list }}"
+
+
+    # - name: Ensure change record exists
+    #   ansible.builtin.assert:
+    #     that:
+    #       - change_info.records | length > 0
+    #     fail_msg: "Change request {{ change_number }} was not found."
+
+    # - name: Set change record facts
+    #   ansible.builtin.set_fact:
+    #     change_record: "{{ change_info.records | first }}"
+
+    # - name: Display current change state
+    #   ansible.builtin.debug:
+    #     msg:
+    #       - "Change number: {{ change_record.number }}"
+    #       - "Current state: {{ change_record.state }}"
+    #       - "Approval status: {{ change_record.approval | default('unknown') }}"
+    #       - "Assignment group: {{ change_record.assignment_group }}"
+
+    # - name: Move assess change into authorize (approval) state
+    #   when: >-
+    #     change_record.state == 'assess'
+    #     or change_record.approval | default('') == 'requested'
+    #   servicenow.itsm.change_request:
+    #     instance:
+    #       host: "{{ snow_instance }}"
+    #       username: "{{ snow_username }}"
+    #       password: "{{ snow_password }}"
+    #     number: "{{ change_number }}"
+    #     state: authorize
+    #     assignment_group: "App Engine Admins"
+    #   register: approval_update
+
+    # - name: Report when no state change was required
+    #   when:
+    #     - change_record.state != 'assess'
+    #     - change_record.approval | default('') != 'requested'
+    #   ansible.builtin.debug:
+    #     msg: >-
+    #       Change {{ change_number }} is in state '{{ change_record.state }}'
+    #       and is not in assess or waiting for approval; no update performed.
+
+    # - name: Display updated change state
+    #   when: approval_update is defined
+    #   ansible.builtin.debug:
+    #     msg:
+    #       - "Change updated: {{ approval_update.changed }}"
+    #       - "New state: {{ approval_update.record.state }}"
+
+    # # 1. Fetch the Sys ID of the Change Request using its number
+    # - name: Get Change Request Details
+    #   servicenow.itsm.change_request_info:
+    #     instance:
+    #       host: "{{ snow_instance }}"
+    #       username: "{{ snow_username }}"
+    #       password: "{{ snow_password }}"
+    #     number: "{{ change_number }}"
+    #   register: change_info
+
+    # # 2. Query the Approval table (sysapproval_approver) for this specific change
+    # - name: Find pending approval for this change
+    #   servicenow.itsm.api_info:
+    #     instance:
+    #       host: "{{ snow_instance }}"
+    #       username: "{{ snow_username }}"
+    #       password: "{{ snow_password }}"
+    #     resource: "sysapproval_approver"
+    #     sysparm_query: "sysapproval={{ change_info.records[0] }}"
+    #   register: approval_info
+
+    # # 3. Update the approval record to 'approved'
+    # - name: Approve the change request
+    #   servicenow.itsm.api:
+    #     instance:
+    #       host: "{{ snow_instance }}"
+    #       username: "{{ snow_username }}"
+    #       password: "{{ snow_password }}"
+    #     resource: "sysapproval_approver"
+    #     sys_id: "{{ change_info.records[0] }}"
+    #     action: patch
+    #     data:
+    #       state: "approved"
+    #   # loop: "{{ approval_info.record }}"
+    #   # when: approval_info.record | length > 0
