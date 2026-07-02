@@ -7,7 +7,7 @@
 
   tasks:
     - name: Update Work Notes and Additional Comments
-      servicenow.itsm.incident_info:
+      servicenow.itsm.incident:
         instance:
           host: "{{ snow_instance }}"
           username: "{{ snow_username }}"
